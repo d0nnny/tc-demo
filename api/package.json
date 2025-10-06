@@ -1,0 +1,8 @@
+{
+  "name": "tc-demo-api",
+  "version": "1.0.0",
+  "description": "API service for TeamCity tc-demo.",
+  "main": "app.js",
+  "scripts": { "start": "node app.js" },
+  "dependencies": { "express": "^4.18.2" }
+}
