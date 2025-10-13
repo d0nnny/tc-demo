@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Amazon Linux EC2 instance for TeamCity Linux Agent (latest AL2023 AMI)"
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: "Environment name (ex: sandbox, prod)"
+  WorkloadName:
+    Type: String
+    Description: "Short name of the workload (ex: tc-agent)"
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: "VPC where EC2 instance will be launched"
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: "Subnet for the EC2 instance"
+  InstanceType:
+    Type: String
+    Default: t3.medium
+    Description: "EC2 instance type"
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: "Key pair to allow SSH access"
+  TeamCityServerUrl:
+    Type: String
+    Description: "URL of your TeamCity server (e.g., https://teamcity.mycompany.com)"
+  AgentName:
+    Type: String
+    Default: "linux-agent-01"
+    Description: "Name for this TeamCity agent"
+
+Resources:
+
+  TCSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Security group for TeamCity Linux agent"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: "Allow SSH (adjust for your IP range)"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: "Allow all outbound traffic"
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+        - arn:aws:iam::aws:policy/AmazonEC2ReadOnlyAccess
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Path: /
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2Role
+      Path: /
+
+  TCAgentInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetId
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      SecurityGroupIds:
+        - !Ref TCSecurityGroup
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          yum update -y
+          yum install -y docker git
+          systemctl enable docker
+          systemctl start docker
+          usermod -aG docker ec2-user
+
+          # Install Java for TeamCity Agent
+          amazon-linux-extras install java-openjdk11 -y
+
+          # Create TeamCity agent directory
+          mkdir -p /opt/teamcity-agent
+          cd /opt/teamcity-agent
+
+          # Download and configure agent
+          curl -O ${TeamCityServerUrl}/update/buildAgent.zip
+          yum install -y unzip
+          unzip buildAgent.zip
+          rm buildAgent.zip
+
+          # Configure the agent name and server URL
+          sed -i "s|serverUrl=.*|serverUrl=${TeamCityServerUrl}|" conf/buildAgent.properties
+          echo "name=${AgentName}" >> conf/buildAgent.properties
+
+          # Start the TeamCity build agent
+          ./bin/agent.sh start
+
+      Tags:
+        - Key: Name
+          Value: !Sub "${WorkloadName}-${EnvironmentName}-tc-agent"
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+Outputs:
+  InstanceId:
+    Description: "ID of the TeamCity Linux Agent instance"
+    Value: !Ref TCAgentInstance
+  PublicIP:
+    Description: "Public IP of the TeamCity Linux Agent (if public subnet)"
+    Value: !GetAtt TCAgentInstance.PublicIp
+  AgentName:
+    Description: "Name assigned to the TeamCity Agent"
+    Value: !Ref AgentName
