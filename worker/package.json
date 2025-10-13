@@ -1,7 +1,9 @@
 {
-  "name": "tc-demo-worker",
+  "name": "demo-worker",
   "version": "1.0.0",
-  "description": "Background worker for TeamCity tc-demo.",
   "main": "worker.js",
-  "scripts": { "start": "node worker.js" }
+  "scripts": {
+    "start": "node worker.js"
+  }
 }
+d

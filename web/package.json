@@ -1,8 +1,11 @@
 {
-  "name": "tc-demo-web",
+  "name": "demo-web",
   "version": "1.0.0",
-  "description": "Web service for TeamCity tc-demo.",
   "main": "app.js",
-  "scripts": { "start": "node app.js" },
-  "dependencies": { "express": "^4.18.2" }
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
 }
