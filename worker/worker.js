@@ -1,9 +1,5 @@
-const express = require('express');
-const app = express();
-const port = process.env.PORT || 8080;
+console.log('✅ Worker service started...');
 
-app.get('/', (req, res) => {
-  res.send('🚀 Hello from TeamCity CI/CD (tc-demo) running on AWS!');
-});
-
-app.listen(port, () => console.log(`App running on port ${port}`));
+setInterval(() => {
+  console.log(`Worker heartbeat: ${new Date().toISOString()}`);
+}, 10000);

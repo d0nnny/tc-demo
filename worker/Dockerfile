@@ -1,6 +1,6 @@
-FROM node:18
-WORKDIR /usr/src/app
+FROM node:22-alpine
+WORKDIR /app
 COPY package*.json ./
-RUN npm install --only=production
+RUN npm install --omit=dev
 COPY . .
-CMD ["npm", "start"]
+CMD ["node", "worker.js"]

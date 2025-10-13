@@ -1,9 +1,15 @@
 const express = require('express');
 const app = express();
-const port = process.env.PORT || 8080;
 
 app.get('/', (req, res) => {
-  res.send('🚀 Hello from TeamCity CI/CD (tc-demo) running on AWS!');
+  res.send('Hello from the Web service!');
 });
 
-app.listen(port, () => console.log(`App running on port ${port}`));
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+const port = process.env.PORT || 80;
+app.listen(port, () => {
+  console.log(`✅ Web service running on port ${port}`);
+});

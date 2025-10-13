@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Demo ECS Cluster + ALB + ECR + Services for App1 and App2
+
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID to deploy into
+    Default: "vpc-0391deb81d26b1317"
+  PublicSubnet1:
+    Type: String
+    Description: First public subnet ID
+    Default: "subnet-0a83a8809ca2bb3ef"
+  PublicSubnet2:
+    Type: String
+    Description: Second public subnet ID
+    Default: "subnet-0916561afb83688c4"
+
+Resources:
+  # --------------------------
+  # ECR Repositories
+  # --------------------------
+  ECRApp1:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: demo-app1
+  ECRApp2:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: demo-app2
+
+  # --------------------------
+  # ECS Cluster
+  # --------------------------
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: demo-cluster
+
+  # --------------------------
+  # IAM Role for ECS Tasks
+  # --------------------------
+  ECSExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: demo-ecsTaskExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # --------------------------
+  # Security Groups
+  # --------------------------
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP inbound to ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic from ALB to ECS tasks
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+
+  # --------------------------
+  # Load Balancer + Target Groups
+  # --------------------------
+  DemoALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: demo-alb
+      Scheme: internet-facing
+      SecurityGroups: [!Ref ALBSecurityGroup]
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+
+  App1TG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: app1-tg
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+      VpcId: !Ref VpcId
+
+  App2TG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: app2-tg
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+      VpcId: !Ref VpcId
+
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref DemoALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: 200
+            ContentType: text/plain
+            MessageBody: "Demo ALB is up."
+
+  App1Rule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPListener
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          Values: ["/app1*", "/app1"]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref App1TG
+
+  App2Rule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HTTPListener
+      Priority: 2
+      Conditions:
+        - Field: path-pattern
+          Values: ["/app2*", "/app2"]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref App2TG
+
+  # --------------------------
+  # ECS Task Definitions
+  # --------------------------
+  App1Task:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: demo-app1-task
+      RequiresCompatibilities: [FARGATE]
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt ECSExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: demo-app1
+          Image: public.ecr.aws/docker/library/nginx:latest
+          PortMappings:
+            - ContainerPort: 80
+          Essential: true
+
+  App2Task:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: demo-app2-task
+      RequiresCompatibilities: [FARGATE]
+      Cpu: 256
+      Memory: 512
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !GetAtt ECSExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: demo-app2
+          Image: public.ecr.aws/docker/library/nginx:latest
+          PortMappings:
+            - ContainerPort: 80
+          Essential: true
+
+  # --------------------------
+  # ECS Services
+  # --------------------------
+  App1Service:
+    Type: AWS::ECS::Service
+    DependsOn: HTTPListener
+    Properties:
+      Cluster: !Ref ECSCluster
+      ServiceName: demo-app1-svc
+      TaskDefinition: !Ref App1Task
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: [!Ref PublicSubnet1, !Ref PublicSubnet2]
+          SecurityGroups: [!Ref ECSSecurityGroup]
+      LoadBalancers:
+        - ContainerName: demo-app1
+          ContainerPort: 80
+          TargetGroupArn: !Ref App1TG
+
+  App2Service:
+    Type: AWS::ECS::Service
+    DependsOn: HTTPListener
+    Properties:
+      Cluster: !Ref ECSCluster
+      ServiceName: demo-app2-svc
+      TaskDefinition: !Ref App2Task
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets: [!Ref PublicSubnet1, !Ref PublicSubnet2]
+          SecurityGroups: [!Ref ECSSecurityGroup]
+      LoadBalancers:
+        - ContainerName: demo-app2
+          ContainerPort: 80
+          TargetGroupArn: !Ref App2TG
+
+Outputs:
+  LoadBalancerDNS:
+    Description: "DNS name of the Application Load Balancer"
+    Value: !GetAtt DemoALB.DNSName
+
+  ECSClusterName:
+    Description: "ECS Cluster Name"
+    Value: !Ref ECSCluster
+
+  App1ServiceArn:
+    Description: "ARN of the ECS Service for App1"
+    Value: !GetAtt App1Service.ServiceArn
+
+  App2ServiceArn:
+    Description: "ARN of the ECS Service for App2"
+    Value: !GetAtt App2Service.ServiceArn
+
